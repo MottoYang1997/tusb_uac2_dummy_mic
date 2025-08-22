@@ -1,7 +1,7 @@
 #include "pico/stdlib.h"
 #include "tusb_config.h"
 #include "tusb.h"
-#include "usb_decsriptors.h"
+#include "usb_descriptors.h"
 
 // ---- 小工具：16字节一行的 hexdump ----
 static void dump_hex(const void* data, uint16_t len, const char* tag)
@@ -107,9 +107,7 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 // 配置 + 音频描述符
 //--------------------------------------------------------------------+
 
-// 96 kHz, 单声道，选择 16bit 或 24bit 其一（单位：Byte）
-#define BYTES_PER_SAMPLE  2   // 16bit 选 2；如用 24bit 则改为 3
-#define BITS_USED         16  // 16bit 选 16；如用 24bit 则改为 24
+// 96 kHz, 单声道。本工程提供 Alt1=16bit 与 Alt2=24bit 两套格式。
 #define CHANNELS          1
 #define MAX_FREQ_HZ       96000
 
@@ -128,6 +126,7 @@ static const uint8_t _cfg_audio_dual[] = {
 // 先放“单位宽”模板（我们选 16bit 做 Alt1）
   TUD_AUDIO_DESC_IAD(ITF_NUM_AUDIO_CONTROL, 0x02, 0x00),
   TUD_AUDIO_DESC_STD_AC(ITF_NUM_AUDIO_CONTROL, 0x00, 0x00),
+// AC Header：CLK→IT→FU→OT。totallen = CLK+IT+OT+FU。
   TUD_AUDIO_DESC_CS_AC(/*bcdADC*/0x0200, /*category*/AUDIO_FUNC_MICROPHONE,
                        /*totallen*/ TUD_AUDIO_DESC_CLK_SRC_LEN
                                    + TUD_AUDIO_DESC_INPUT_TERM_LEN

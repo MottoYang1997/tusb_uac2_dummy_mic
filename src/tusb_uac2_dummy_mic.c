@@ -5,28 +5,26 @@
 
 #include "tusb_config.h"
 #include "tusb.h"
-#include "usb_decsriptors.h"
+#include "usb_descriptors.h"
+
+// ===== 本文件职责 =====
+// 1) 处理 UAC2 控制面（GET/SET Entity：采样率、音量/静音、IT Connector）
+// 2) 音频数据面：在 tud_audio_tx_done_isr() 中按“每毫秒样本数”写入 EP FIFO
+// 3) ★重要：请手动将 TinyUSB 更新到最新版（master 或最新 release）。
+//    本工程依赖其 Audio 类在 SET_INTERFACE/流控上的修复；并确保 lib/tusb/tusb_config.h 中
+//    CFG_TUD_AUDIO_EP_IN_FLOW_CONTROL=1 以支持 44.1kHz 抖包。
 
 // 正弦波发生器状态
 static float phase = 0.0f;
-static uint8_t cur_bits = 16;            // Alt1=16, Alt2=24
-static uint8_t cur_alt = 0;              // 0/1/2
 
 // USB States and Variables
+static uint8_t g_cur_alt = AS_ALT0_STOP;              // 0/1/2  Alt1=16, Alt2=24
 static volatile uint32_t g_sample_rate = 44100;              // 当前采样率（Hz）
-static const uint32_t    k_sample_rates[] = {44100, 96000};  // 支持的采样率
-
 static volatile uint8_t  g_mute_cur = 0;                     // 0/1
 static volatile int16_t  g_vol_min  = (-60) * 256;           // -60 dB
 static volatile int16_t  g_vol_max  = (  0) * 256;           //  0 dB
 static volatile int16_t  g_vol_res  = (  1) * 256;           //  1 dB 步进
 static volatile int16_t  g_vol_cur  = ( -6) * 256;           // -6 dB
-
-// 如果你的波形生成/音量缩放会用到当前音量，可提供一个工具函数：
-static inline float volume_scale_linear(void) {
-  // UAC2 音量是 1/256 dB，换算到线性倍率： 10^(dB/20)
-  return powf(10.0f, (g_vol_cur / 256.0f) / 20.0f);
-}
 
 // 将线性音量（dB/256）应用到样本上
 static inline float volume_scale(void) {
@@ -165,63 +163,53 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const * 
   return false; // 其他未实现，stall
 }
 
-// 在每个 USB 帧（1ms）前调用：准备本帧要发送的字节
-bool tud_audio_tx_done_isr(uint8_t rhport, uint16_t n_bytes_sent, uint8_t func_id, uint8_t ep_in, uint8_t cur_alt_setting) {
-  // 若当前不在流模式（alt=0），不要写入，避免和 EP 重新打开时的首包冲突
-  if (cur_alt_setting == 0) {
-    return true;
-  }
+bool tud_audio_tx_done_isr(uint8_t rhport, uint16_t n_bytes_sent,
+                           uint8_t func_id, uint8_t ep_in, uint8_t g_cur_alt_setting)
+{
+  (void)rhport; (void)n_bytes_sent; (void)func_id; (void)ep_in;
 
-  (void)rhport; (void)func_id; (void)ep_in;
-  cur_alt = cur_alt_setting;
-  
-  // 根据 Alt 选择位宽
-  cur_bits = (cur_alt_setting == 2) ? 24 : 16;
+  // Alt0 = 停流
+  if (g_cur_alt_setting == 0) return true;
 
-  // 每 1ms 需要的样本数。
-  // 关键修复：正确处理 44.1kHz 的小数部分（平均每 10 帧补 1 个样本：44/45 交替）。
-  // 之前的实现 acc += (rem << 16) 会导致每帧都 +1（供给过多/过少），从而出现空帧“断点”。
-  static uint16_t frac = 0;         // 0..999 的小数累加器（跨帧保留）
-  static uint32_t last_fs = 0;      // 采样率变化时重置
-  if (last_fs != g_sample_rate) {
-    frac = 0;
-    last_fs = g_sample_rate;
-  }
-  uint32_t per_ms = g_sample_rate / 1000;   // 基本样本数
-  frac += (uint16_t)(g_sample_rate % 1000); // 累加小数部分
-  if (frac >= 1000) {
-    per_ms++;
-    frac -= 1000;
-  }
+  g_cur_alt  = g_cur_alt_setting;
+
+  // 每 1ms 需要的样本数：
+  //  44.1kHz → 44 与 45 交替（小数累加满 1000 补 1）
+  static uint16_t frac = 0;   // 0..999
+  static uint32_t last_fs = 0;
+  if (last_fs != g_sample_rate) { frac = 0; last_fs = g_sample_rate; }
+  uint32_t per_ms = g_sample_rate / 1000;
+  frac += (uint16_t)(g_sample_rate % 1000);
+  if (frac >= 1000) { per_ms++; frac -= 1000; }
 
   float amp = 0.5f * volume_scale();
   float step = 2.0f * (float)M_PI * 440.0f / (float)g_sample_rate;
 
-  // 写入 EP FIFO
-  if (cur_bits == 16) {
-    static int16_t buf16[192]; // 96 个样本上限（96k/1000=96）
+  if (g_cur_alt == AS_ALT1_16BIT) {  
+    static int16_t buf16[192]; // 96k/1ms 上限
     for (uint32_t i=0; i<per_ms; i++) {
-      float s = sinf(phase) * amp; phase += step; if (phase > 2*M_PI) phase -= 2*M_PI;
+      float s = sinf(phase) * amp;
+      phase += step; if (phase > 2.0f*(float)M_PI) phase -= 2.0f*(float)M_PI;
       int32_t v = (int32_t)lrintf(s * 32767.0f);
       buf16[i] = (int16_t)v;
     }
-    tud_audio_write((uint8_t const*)buf16, per_ms * 2); // 单声道 * 2 字节
-  } else {
-    static uint8_t buf24[288]; // 96 * 3 字节
+    tud_audio_write((uint8_t const*)buf16, per_ms * 2);
+  } else if (g_cur_alt == AS_ALT2_24BIT) {
+    static uint8_t buf24[288]; // 96k*3/1000 = 288
     for (uint32_t i=0; i<per_ms; i++) {
-      float s = sinf(phase) * amp; phase += step; if (phase > 2*M_PI) phase -= 2*M_PI;
-      int32_t v = (int32_t)lrintf(s * 8388607.0f); // 24-bit
-      // 小端 24-bit 打包
-      uint32_t u = (uint32_t)(v & 0xFFFFFF);
-      buf24[3*i+0] = (uint8_t)(u & 0xFF);
-      buf24[3*i+1] = (uint8_t)((u >> 8) & 0xFF);
-      buf24[3*i+2] = (uint8_t)((u >> 16) & 0xFF);
+      float s = sinf(phase) * amp;
+      phase += step; if (phase > 2.0f*(float)M_PI) phase -= 2.0f*(float)M_PI;
+      int32_t v = (int32_t)lrintf(s * 8388607.0f);
+      // 24-bit little-endian
+      buf24[3*i+0] = (uint8_t)(v & 0xFF);
+      buf24[3*i+1] = (uint8_t)((v >> 8) & 0xFF);
+      buf24[3*i+2] = (uint8_t)((v >> 16) & 0xFF);
     }
-    tud_audio_write((uint8_t const*)buf24, per_ms * 3);
+    tud_audio_write(buf24, per_ms * 3);
   }
-
-  return true; // 允许 TinyUSB 继续发送
+  return true;
 }
+
 
 // TinyUSB 要求：当 AS Alt 切换时解析参数，可通过 set_itf 回调获知
 bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_request) {
@@ -230,7 +218,7 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_reques
   uint8_t itf = TU_U16_LOW(p_request->wIndex);
   uint8_t alt = TU_U16_LOW(p_request->wValue);
   if (itf == 1) { // 我们的 AS 接口号
-    cur_alt = alt;
+    g_cur_alt = alt;
   }
   printf("[ITF ] set interface=%u alt=%u\n", itf, alt);
   tud_audio_clear_ep_in_ff();

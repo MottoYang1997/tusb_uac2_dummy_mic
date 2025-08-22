@@ -43,6 +43,7 @@
         "board_api.h": "c",
         "tusb.h": "c",
         "stdlib.h": "c",
-        "usb_decsriptors.h": "c"
+        "usb_decsriptors.h": "c",
+        "cstdint": "c"
     }
 }

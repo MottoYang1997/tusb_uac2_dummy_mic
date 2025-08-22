@@ -37,7 +37,8 @@ pico_sdk_init()
 
 add_executable(tusb_uac2_dummy_mic)
 
-target_compile_definitions(tusb_uac2_dummy_mic PRIVATE CFG_TUSB_DEBUG=1)
+# Overwrite TinyUSB Logging Level
+# target_compile_definitions(tusb_uac2_dummy_mic PRIVATE CFG_TUSB_DEBUG=1)
 
 target_sources(tusb_uac2_dummy_mic PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src/tusb_uac2_dummy_mic.c

@@ -1,6 +1,9 @@
 #ifndef _TUSB_CONFIG_H_
 #define _TUSB_CONFIG_H_
-#include "usb_decsriptors.h"
+#include "usb_descriptors.h"
+
+// ★ 强烈建议：手动将 TinyUSB 更新到最新（master 或最新 release）。
+// 本工程依赖其 UAC2 在 SET_INTERFACE/流控的修复；旧版可能出现Race Condition和PANIC。
 
 // RP2040: 双核但 USB 在 core0 上跑即可
 #define CFG_TUSB_MCU                OPT_MCU_RP2040
@@ -8,9 +11,9 @@
 #define CFG_TUSB_RHPORT0_MODE       (OPT_MODE_DEVICE)
 #define TUD_OPT_RP2040_USB_DEVICE_UFRAME_FIX 1
 
-// 日志可关 2==info redirected to printf
+// 日志等级,在CMakeList中覆盖定义了 0==none 1==warning 2==info
 #ifndef CFG_TUSB_DEBUG
-#define CFG_TUSB_DEBUG              2
+#define CFG_TUSB_DEBUG              0
 #endif
 #define CFG_TUSB_DEBUG_PRINTF       printf
 
@@ -27,7 +30,7 @@
 #define CFG_TUD_AUDIO_ENABLE_EP_OUT 0
 
 // 支持帧大小流控（44.1 kHz 需要）
-#define CFG_TUD_AUDIO_EP_IN_FLOW_CONTROL 1
+#define CFG_TUD_AUDIO_EP_IN_FLOW_CONTROL 1  // 必开：44.1kHz 抖包需要帧长流控（Async IN）
 
 // 只用中间软件 FIFO（环形缓冲）
 #define CFG_TUD_MEM_SECTION
