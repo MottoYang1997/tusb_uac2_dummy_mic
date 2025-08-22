@@ -29,25 +29,18 @@
 ## 一分钟上手
 
 1. **准备环境**
+   * 安装 **VS Code**，并且安装Pico SDK插件。
+   * 使用插件安装 **Pico SDK**、CMake、ARM 工具链。
+   * 把 **TinyUSB 更新到最新版**（找到PicoSDK安装目录的lib文件夹，手动替换TinyUSB官方最新版本）。
 
-   * 安装 **Pico SDK**、CMake、ARM 工具链。
-   * 把 **TinyUSB 更新到最新版**（submodule 或直接替换为官方最新）。
+2. **编译和烧录**
 
-2. **编译**
+   * 使用Pico SDK插件编译和烧录程序到RP2040 Pico开发板上。
 
-   ```bash
-   cmake -S . -B build -DPICO_SDK_PATH=/path/to/pico-sdk
-   cmake --build build -j
-   ```
-
-3. **烧录**
-
-   * BOOTSEL 插入电脑，把 `build/*.uf2` 拖进 U 盘，或用 `picotool load -x xxx.uf2`。
-
-4. **验证**
+3. **验证**
 
    * Windows 11 / Linux 能看到一个“USB Microphone (UAC2)”。
-   * 录音软件里切到 **16/24-bit、44.1/96 kHz** 试采；日志会打印 alt 切换与采样率。
+   * 录音软件里切到 **16/24-bit、44.1/96 kHz** 试采440Hz正弦波；日志会打印 alt 切换与采样率。
 
 ---
 
